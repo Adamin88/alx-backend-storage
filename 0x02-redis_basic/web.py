@@ -1,38 +1,38 @@
-#!/usr/bin/env python3
-"""
-Caching request module
-"""
-import redis
 import requests
+import redis
 from functools import wraps
-from typing import Callable
+import time
 
-# Initialize Redis client globally
-client = redis.Redis()
+# Initialize Redis client
+r = redis.Redis()
 
-def track_get_page(fn: Callable) -> Callable:
-    """Decorator to cache the response and track the number of times the URL is accessed."""
-    @wraps(fn)
-    def wrapper(url: str) -> str:
-        """Wrapper function to check cache, track access count, and fetch URL content."""
-        # Increment the access count for the URL
-        client.incr(f'count:{url}')
-        
-        # Check if the URL's content is already cached
-        cached_page = client.get(f'cache:{url}')
-        if cached_page:
-            return cached_page.decode('utf-8')
-        
-        # If not cached, fetch the content using the original function
-        response = fn(url)
-        
-        # Cache the fetched content with an expiration time of 10 seconds
-        client.setex(f'cache:{url}', 10, response)
-        
-        return response
-    return wrapper
+def cache_with_count(expiration=10):
+    """Decorator to cache the page content and count URL accesses."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(url, *args, **kwargs):
+            count_key = f"count:{url}"
+            cache_key = f"cache:{url}"
 
-@track_get_page
+            # Increment the access count
+            r.incr(count_key)
+
+            # Check if the result is already cached
+            cached_result = r.get(cache_key)
+            if cached_result:
+                return cached_result.decode('utf-8')
+
+            # Call the actual function and get the result
+            result = func(url, *args, **kwargs)
+
+            # Cache the result with an expiration time
+            r.setex(cache_key, expiration, result)
+            
+            return result
+        return wrapper
+    return decorator
+
+@cache_with_count(expiration=10)
 def get_page(url: str) -> str:
     """Fetches the HTML content of a URL."""
     response = requests.get(url)
@@ -41,5 +41,9 @@ def get_page(url: str) -> str:
 # Example usage
 if __name__ == "__main__":
     test_url = "http://slowwly.robertomurray.co.uk"
+    print(get_page(test_url))
+    time.sleep(5)  # Wait for 5 seconds
+    print(get_page(test_url))
+    time.sleep(11)  # Wait for another 11 seconds (total 16 seconds from start)
     print(get_page(test_url))
 
